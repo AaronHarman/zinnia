@@ -10,39 +10,45 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 
 fn main() {
-
+    // input device stuff
     let host = cpal::default_host();
-    let device = host.default_input_device().expect("no input device available");
-    let mut supported_configs_range = device.supported_output_configs()
+    let in_device = host.default_input_device().expect("no input device available");
+    let mut supported_configs_range = in_device.supported_input_configs()
         .expect("error while querying configs");
     let supported_config = supported_configs_range.next()
         .expect("no supported config?!")
         .with_max_sample_rate();
-    let stream = device.build_input_stream(
+    let in_stream = in_device.build_input_stream(
         &supported_config.into(),
         move |data: & [f32], _: &cpal::InputCallbackInfo| {
             // react to stream events and read or write stream data here.
-            println!("Length: {}", data.len());
+            println!("Input Length: {}", data.len());
         },
         move |err| {
             // react to errors here.
+            eprintln!("Error with audio input stream: {}", err);
         },
         None // None=blocking, Some(Duration)=timeout
     );
 
+    
     // make a channel for sending messages to be spoken to the talk thread
     let (send, recv) = mpsc::channel::<&str>();
 
     // make a thread to handle talking, and give it the receiver end of the channel
     let talk_thread = thread::spawn(move || {
         for thing in recv {
-            say(thing.to_string());
+            match say(thing.to_string()) {
+                Ok(_) => {},
+                Err(e) => {eprintln!("Error with speech synthesis: {}", e);}
+            }
         }
     });
 
-    send.send("Zinnia here!");
-    send.send("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must.");
+    let _ = send.send("Zinnia here!");
+    let _ = send.send("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must.");
 
+    
     drop(send);
     talk_thread.join().expect("Error joining the talk thread");
 }
@@ -67,6 +73,7 @@ fn say(text : String) -> io::Result<u8> {
     // wait for piper to finish synthesizing and grab the audio output
     let stream = piper.wait_with_output()?;
 
+    
     // open aplay, and set it to the correct audio format
     let mut child = Command::new("aplay")
         .stdin(Stdio::piped())
