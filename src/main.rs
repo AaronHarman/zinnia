@@ -15,20 +15,26 @@ use rustpotter::{Rustpotter, RustpotterConfig};
 fn main() {
     // initialize rustpotter for wakeword detection
     let mut rp_config = RustpotterConfig::default();
-    rp_config.detector.threshold = 0.20;
-    rp_config.detector.avg_threshold = 0.15;
+    rp_config.detector.threshold = 0.42;
+    rp_config.detector.avg_threshold = 0.23;
     rp_config.filters = rustpotter::FiltersConfig {
         gain_normalizer: rustpotter::GainNormalizationConfig {
             enabled: true,
             gain_ref: None,
-            min_gain: 0.5,
+            min_gain: 0.1,
             max_gain: 1.0,
         },
         band_pass: rustpotter::BandPassConfig {
-            enabled: true,
+            enabled: false,
             low_cutoff: 80.0,
             high_cutoff: 400.0,
         },
+    };
+    rp_config.fmt = rustpotter::AudioFmt {
+        sample_rate: 44100,
+        sample_format: rustpotter::SampleFormat::F32,
+        channels: 2,
+        endianness: rustpotter::Endianness::Little,
     };
     println!("config: {:#?}", rp_config);
     let mut rp = Rustpotter::new(&rp_config).unwrap();
@@ -43,10 +49,10 @@ fn main() {
     println!("Input device: {}", in_device.name().unwrap());
     let mut supported_configs_range = in_device.supported_input_configs()
         .expect("error while querying configs");
-    let supported_config = supported_configs_range.filter(|x| x.sample_format() == cpal::SampleFormat::F32)
+    let supported_config = supported_configs_range.filter(|x| x.sample_format() == cpal::SampleFormat::F32 && x.channels() == 2)
         .next()
         .expect("no supported config?!")
-        .with_sample_rate(cpal::SampleRate(16000));
+        .with_sample_rate(cpal::SampleRate(44100));
     println!("input config: {:#?}", supported_config);
     let in_stream = in_device.build_input_stream(
         &supported_config.into(),
@@ -56,7 +62,7 @@ fn main() {
             //println!("{:#?}", data);
             let mut data_vec = data.to_vec().into();
             samples_buffer.append(&mut data_vec);
-            while false && samples_buffer.len() >= rp_buffer_size {
+            while samples_buffer.len() >= rp_buffer_size {
                 //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
                 let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());
                 if let Some(detection) = detection {
@@ -84,8 +90,8 @@ fn main() {
         }
     });
 
-    let _ = send.send("Zinnia here!");
-    let _ = send.send("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must.");
+    //let _ = send.send("Zinnia here!");
+    //let _ = send.send("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must.");
 
     
     drop(send);
