@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 cpal = "0.15.3"
 rustpotter = "3.0.2"
+tray-item = { version = "0.10.0", features = ["ksni"] }
+png = "0.16"
