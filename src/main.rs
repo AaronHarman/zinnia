@@ -12,6 +12,8 @@ use rustpotter::{Rustpotter, RustpotterConfig};
 
 use tray_item::{IconSource, TrayItem};
 
+use vosk::{Model, Recognizer, DecodingState};
+
 // Messages to be sent to the speech thread
 enum SpeakMessage<'a> {
     Say(&'a str),
@@ -22,7 +24,17 @@ enum TrayMessage {
     Close,
 }
 
+// State of the overall program
+enum State {
+    Waiting,
+    Listening,
+    CommandRunning,
+}
+
 fn main() {
+    // state stuff
+    let mut state = State::Waiting;
+
     // initialize rustpotter for wakeword detection
     let mut rp_config = RustpotterConfig::default();
     rp_config.detector.threshold = 0.42;
@@ -41,8 +53,8 @@ fn main() {
         },
     };
     rp_config.fmt = rustpotter::AudioFmt {
-        sample_rate: 44100,
-        sample_format: rustpotter::SampleFormat::F32,
+        sample_rate: 16000,
+        sample_format: rustpotter::SampleFormat::I16,
         channels: 2,
         endianness: rustpotter::Endianness::Little,
     };
@@ -50,8 +62,15 @@ fn main() {
     let mut rp = Rustpotter::new(&rp_config).unwrap();
     // load the wakeword file
     rp.add_wakeword_from_file("Yo Zinnia", "./resources/Yo_Zinnia2.rpw").unwrap();
-    let mut samples_buffer: VecDeque<f32> = VecDeque::new();
+    let mut samples_buffer: VecDeque<i16> = VecDeque::new();
     let rp_buffer_size = rp.get_samples_per_frame();
+
+    // vosk stuff
+    let vosk_model = Model::new("resources/vosk-model-small-en-us-0.15").unwrap();
+    let mut recog = Recognizer::new(&vosk_model, 16000.0).unwrap();
+    //recog.set_max_alternatives(10);
+    //recog.set_words(true);
+    //recog.set_partial_words(true);
 
     // make a channel for sending messages to be spoken to the talk thread
     let (send, recv) = mpsc::channel::<SpeakMessage>();
@@ -63,26 +82,44 @@ fn main() {
     println!("Input device: {}", in_device.name().unwrap());
     let supported_configs_range = in_device.supported_input_configs()
         .expect("error while querying configs");
-    let supported_config = supported_configs_range.filter(|x| x.sample_format() == cpal::SampleFormat::F32 && x.channels() == 2)
+    let supported_config = supported_configs_range.filter(|x| x.sample_format() == cpal::SampleFormat::I16 && x.channels() == 2)
         .next()
         .expect("no supported config?!")
-        .with_sample_rate(cpal::SampleRate(44100));
+        .with_sample_rate(cpal::SampleRate(16000));
     println!("input config: {:#?}", supported_config);
     let in_stream = in_device.build_input_stream(
         &supported_config.into(),
-        move |data: & [f32], _: &cpal::InputCallbackInfo| {
+        move |data: & [i16], _: &cpal::InputCallbackInfo| {
             // react to stream events and read or write stream data here.
-            //println!("Input Length: {}", data.len());
-            //println!("{:#?}", data);
-            let mut data_vec = data.to_vec().into();
-            samples_buffer.append(&mut data_vec);
-            while samples_buffer.len() >= rp_buffer_size {
-                //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
-                let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());
-                if let Some(detection) = detection {
-                    println!("Detected: {:?}", detection);
-                    let _ = in_send.send(SpeakMessage::Say("Zinnia here!"));
-                }
+            match state {
+                State::Waiting => {
+                    let mut data_vec = data.to_vec().into();
+                    samples_buffer.append(&mut data_vec);
+                    while samples_buffer.len() >= rp_buffer_size {
+                        //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
+                        let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());
+                        if let Some(detection) = detection {
+                            println!("Detected: {:?}", detection);
+                            let _ = in_send.send(SpeakMessage::Say("Zinnia here!"));
+                            state = State::Listening;
+                        }
+                    }
+                },
+                State::Listening => {
+                    let decoding_state = recog.accept_waveform(data).unwrap();
+                    if decoding_state == DecodingState::Finalized {
+                        let vosk::CompleteResult::Single(single_result) = recog.final_result() else { todo!() };
+                        println!("Heard: \"{}\"", single_result.text);
+                        //let result = recog.final_result();
+                        //println!("{:#?}", result);
+                        recog.reset();
+                        //state = State::Waiting;
+                    }
+                    if decoding_state == DecodingState::Failed {
+                        eprintln!("Something broke with decoding the audio in Vosk");
+                    }
+                },
+                State::CommandRunning => {}, // doesn't do anything, just waits
             }
         },
         move |err| {
@@ -114,8 +151,8 @@ fn main() {
         }
     });
 
-    let _ = send.send(SpeakMessage::Say("Zinnia here!"));
-    let _ = send.send(SpeakMessage::Say("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must."));
+    //let _ = send.send(SpeakMessage::Say("Zinnia here!"));
+    //let _ = send.send(SpeakMessage::Say("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must."));
 
     // get the icon to use in the tray
     let img_decoder = png::Decoder::new(Cursor::new(include_bytes!("../resources/1f444.png")));
