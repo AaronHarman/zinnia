@@ -6,9 +6,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::collections::VecDeque;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, HostTrait};
 
-use rustpotter::{Rustpotter, RustpotterConfig};
+use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat};
 
 use tray_item::{IconSource, TrayItem};
 
@@ -36,41 +36,15 @@ fn main() {
     let mut state = State::Waiting;
 
     // initialize rustpotter for wakeword detection
-    let mut rp_config = RustpotterConfig::default();
-    rp_config.detector.threshold = 0.42;
-    rp_config.detector.avg_threshold = 0.23;
-    rp_config.filters = rustpotter::FiltersConfig {
-        gain_normalizer: rustpotter::GainNormalizationConfig {
-            enabled: true,
-            gain_ref: None,
-            min_gain: 0.1,
-            max_gain: 1.0,
-        },
-        band_pass: rustpotter::BandPassConfig {
-            enabled: false,
-            low_cutoff: 80.0,
-            high_cutoff: 400.0,
-        },
-    };
-    rp_config.fmt = rustpotter::AudioFmt {
-        sample_rate: 16000,
-        sample_format: rustpotter::SampleFormat::I16,
-        channels: 2,
-        endianness: rustpotter::Endianness::Little,
-    };
-    println!("config: {:#?}", rp_config);
-    let mut rp = Rustpotter::new(&rp_config).unwrap();
-    // load the wakeword file
-    rp.add_wakeword_from_file("Yo Zinnia", "./resources/Yo_Zinnia2.rpw").unwrap();
+    let mut rp = rustpotter_init(SampleFormat::I16, 16000, "./resources/Yo_Zinnia2.rpw").unwrap();
+
+    // set up a buffer for feeding samples to Rustpotter
     let mut samples_buffer: VecDeque<i16> = VecDeque::new();
     let rp_buffer_size = rp.get_samples_per_frame();
 
-    // vosk stuff
+    // set up vosk for speech recognition (it's short enough that it didn't get its own function)
     let vosk_model = Model::new("resources/vosk-model-small-en-us-0.15").unwrap();
     let mut recog = Recognizer::new(&vosk_model, 16000.0).unwrap();
-    //recog.set_max_alternatives(10);
-    //recog.set_words(true);
-    //recog.set_partial_words(true);
 
     // make a channel for sending messages to be spoken to the talk thread
     let (send, recv) = mpsc::channel::<SpeakMessage>();
@@ -228,4 +202,41 @@ fn say(text : String) -> io::Result<u8> {
     child.wait()?;
 
     return Ok(0);
+}
+
+// initializes Rustpotter using settings passed in, plus some baked in ones that I don't expect to change'
+fn rustpotter_init(format : SampleFormat, sample_rate : u16, wwpath : &str) -> Result<Rustpotter, &'static str> {
+    let mut rp_config = RustpotterConfig::default();
+    rp_config.detector.threshold = 0.42;
+    rp_config.detector.avg_threshold = 0.23;
+    rp_config.filters = rustpotter::FiltersConfig {
+        gain_normalizer: rustpotter::GainNormalizationConfig {
+            enabled: true,
+            gain_ref: None,
+            min_gain: 0.1,
+            max_gain: 1.0,
+        },
+        band_pass: rustpotter::BandPassConfig {
+            enabled: false,
+            low_cutoff: 80.0,
+            high_cutoff: 400.0,
+        },
+    };
+    rp_config.fmt = rustpotter::AudioFmt {
+        sample_rate: sample_rate as usize,
+        sample_format: format,
+        channels: 2,
+        endianness: rustpotter::Endianness::Little,
+    };
+    println!("config: {:#?}", rp_config);
+    let mut rp = match Rustpotter::new(&rp_config) {
+        Ok(x) => {x},
+        Err(_) => {return Err("Failed to initialize Rustpotter")},
+    };
+    // load the wakeword file
+    match rp.add_wakeword_from_file("Yo Zinnia", wwpath) {
+        Ok(_) => {},
+        Err(_) => {return Err("Failed to add wakeword from file")},
+    };
+    return Ok(rp);
 }
