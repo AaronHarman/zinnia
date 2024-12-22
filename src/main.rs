@@ -59,37 +59,17 @@ fn main() {
         }
     });
 
-   
-
     //let _ = send.send(SpeakMessage::Say("Zinnia here!"));
     //let _ = send.send(SpeakMessage::Say("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must."));
 
-    // get the icon to use in the tray
-    let img_decoder = png::Decoder::new(Cursor::new(include_bytes!("../resources/1f444.png")));
-    let (img_info, mut img_reader) = img_decoder.read_info().unwrap();
-    let mut img_buf = vec![0; img_info.buffer_size()];
-    img_reader.next_frame(&mut img_buf).unwrap();
-    let icon = IconSource::Data {
-        data: img_buf,
-        height: 72,
-        width: 72,
-    };
     // set up the tray menu
-    let mut tray = TrayItem::new("Zinnia", icon).unwrap();
-    tray.add_label("ZINNIA").unwrap();
-    let (tray_tx, tray_rx) = mpsc::sync_channel::<TrayMessage>(2);
-    let tray_quit_tx = tray_tx.clone();
-    let id_menu = tray.inner_mut()
-        .add_menu_item_with_id("Close Zinnia", move || {
-            tray_quit_tx.send(TrayMessage::Close).unwrap();
-        }).unwrap();
-
-    println!("TEST: Made it to the tray message watch loop");
+    let tray_rx = tray_menu_init();
+    
     // watch for tray messages and spoken input
     loop {
         match tray_rx.try_recv() {
             Ok(TrayMessage::Close) => {
-                break;
+                break; // breaking out of this loop will end the program
             }
             Err(e) => {
                 match e {
@@ -281,3 +261,29 @@ fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, 
     
     return Ok((in_stream, textrx));
 }
+
+// initialize the tray menu
+fn tray_menu_init() -> Receiver<TrayMessage> {
+    // get the icon to use in the tray
+    let img_decoder = png::Decoder::new(Cursor::new(include_bytes!("../resources/1f444.png")));
+    let (img_info, mut img_reader) = img_decoder.read_info().unwrap();
+    let mut img_buf = vec![0; img_info.buffer_size()];
+    img_reader.next_frame(&mut img_buf).unwrap();
+    let icon = IconSource::Data {
+        data: img_buf,
+        height: 72,
+        width: 72,
+    };
+    // set up the tray menu
+    let mut tray = TrayItem::new("Zinnia", icon).unwrap();
+    tray.add_label("ZINNIA").unwrap();
+    let (tray_tx, tray_rx) = mpsc::sync_channel::<TrayMessage>(2);
+    let tray_quit_tx = tray_tx.clone();
+    let id_menu = tray.inner_mut()
+        .add_menu_item_with_id("Close Zinnia", move || {
+            tray_quit_tx.send(TrayMessage::Close).unwrap();
+        }).unwrap();
+
+    return tray_rx;
+}
+
