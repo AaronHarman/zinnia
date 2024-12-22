@@ -3,10 +3,12 @@ use std::io;
 use std::io::{Write, Cursor};
 use std::process::Stdio;
 use std::sync::mpsc;
+use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::thread;
 use std::collections::VecDeque;
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::Stream;
 
 use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat};
 
@@ -15,8 +17,8 @@ use tray_item::{IconSource, TrayItem};
 use vosk::{Model, Recognizer, DecodingState};
 
 // Messages to be sent to the speech thread
-enum SpeakMessage<'a> {
-    Say(&'a str),
+enum SpeakMessage{
+    Say(String),
 }
 
 // Messages to be sent from the tray icon to the main program
@@ -32,91 +34,23 @@ enum State {
 }
 
 fn main() {
-    // state stuff
-    let mut state = State::Waiting;
-
-    // initialize rustpotter for wakeword detection
-    let mut rp = rustpotter_init(SampleFormat::I16, 16000, "./resources/Yo_Zinnia2.rpw").unwrap();
-
-    // set up a buffer for feeding samples to Rustpotter
-    let mut samples_buffer: VecDeque<i16> = VecDeque::new();
-    let rp_buffer_size = rp.get_samples_per_frame();
-
-    // set up vosk for speech recognition (it's short enough that it didn't get its own function)
-    let vosk_model = Model::new("resources/vosk-model-small-en-us-0.15").unwrap();
-    let mut recog = Recognizer::new(&vosk_model, 16000.0).unwrap();
-
     // make a channel for sending messages to be spoken to the talk thread
-    let (send, recv) = mpsc::channel::<SpeakMessage>();
-    let in_send = send.clone(); // make another input for the in_stream to use
-
-    // input device stuff
-    let host = cpal::default_host();
-    let in_device = host.default_input_device().expect("no input device available");
-    println!("Input device: {}", in_device.name().unwrap());
-    let supported_configs_range = in_device.supported_input_configs()
-        .expect("error while querying configs");
-    let supported_config = supported_configs_range.filter(|x| x.sample_format() == cpal::SampleFormat::I16 && x.channels() == 2)
-        .next()
-        .expect("no supported config?!")
-        .with_sample_rate(cpal::SampleRate(16000));
-    println!("input config: {:#?}", supported_config);
-    let in_stream = in_device.build_input_stream(
-        &supported_config.into(),
-        move |data: & [i16], _: &cpal::InputCallbackInfo| {
-            // react to stream events and read or write stream data here.
-            match state {
-                State::Waiting => {
-                    let mut data_vec = data.to_vec().into();
-                    samples_buffer.append(&mut data_vec);
-                    while samples_buffer.len() >= rp_buffer_size {
-                        //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
-                        let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());
-                        if let Some(detection) = detection {
-                            println!("Detected: {:?}", detection);
-                            let _ = in_send.send(SpeakMessage::Say("Zinnia here!"));
-                            state = State::Listening;
-                        }
-                    }
-                },
-                State::Listening => {
-                    let decoding_state = recog.accept_waveform(data).unwrap();
-                    if decoding_state == DecodingState::Finalized {
-                        let vosk::CompleteResult::Single(single_result) = recog.final_result() else { todo!() };
-                        println!("Heard: \"{}\"", single_result.text);
-                        //let result = recog.final_result();
-                        //println!("{:#?}", result);
-                        recog.reset();
-                        //state = State::Waiting;
-                    }
-                    if decoding_state == DecodingState::Failed {
-                        eprintln!("Something broke with decoding the audio in Vosk");
-                    }
-                },
-                State::CommandRunning => {}, // doesn't do anything, just waits
-            }
-        },
-        move |err| {
-            // react to errors here.
-            eprintln!("Error with audio input stream: {}", err);
-        },
-        None // None=blocking, Some(Duration)=timeout
-    );
-    // This is supposed to be here but it actually makes it not work for some reason so uhh yeah
-    //match in_stream {
-    //    Ok(is) => {
-    //        match is.play() { // it's possible the stream won't start automatically so this makes sure it does
-    //            Ok(_) => {},
-    //            Err(e) => {eprintln!("Error starting audio stream: {}", e);}
-    //        }
-    //    },
-    //    Err(e) => { eprintln!("Error making audio input stream: {}", e); }
-    //}
+    let (speaktx, speakrx) = mpsc::channel::<SpeakMessage>();
     
+    let (in_stream, speechrx) = match transcription_init(String::from("Zinnia here!"),
+        String::from("./resources/Yo_Zinnia2.rpw"),
+        String::from("resources/vosk-model-en-us-0.21"),
+        speaktx.clone()) {
+        Ok(x) => {x},
+        Err(e) => {
+            eprintln!("{}", e);
+            return;
+        }
+    };
     
     // make a thread to handle talking, and give it the receiver end of the channel
     let talk_thread = thread::spawn(move || {
-        for message in recv {
+        for message in speakrx {
             let SpeakMessage::Say(thing) = message;
             match say(thing.to_string()) {
                 Ok(_) => {},
@@ -124,6 +58,8 @@ fn main() {
             }
         }
     });
+
+   
 
     //let _ = send.send(SpeakMessage::Say("Zinnia here!"));
     //let _ = send.send(SpeakMessage::Say("There are very few good reasons to skin a cat, but according to popular idioms there are quite a few methods to do so if you find you must."));
@@ -149,21 +85,36 @@ fn main() {
         }).unwrap();
 
     println!("TEST: Made it to the tray message watch loop");
-    // watch for tray messages
+    // watch for tray messages and spoken input
     loop {
-        match tray_rx.recv() {
+        match tray_rx.try_recv() {
             Ok(TrayMessage::Close) => {
                 break;
             }
             Err(e) => {
-                eprintln!("Error with the tray menu: {}", e);
+                match e {
+                    TryRecvError::Empty => {},
+                    TryRecvError::Disconnected => {eprintln!("Error: Tray menu channel unexpectedly closed");}
+                }
+            }
+        }
+        match speechrx.try_recv() {
+            Ok(s) => {
+                println!("Heard: \"{}\"", s);
+                let _ = speaktx.send(SpeakMessage::Say(s));
+            },
+            Err(e) => {
+                match e {
+                    TryRecvError::Empty => {},
+                    TryRecvError::Disconnected => {eprintln!("Error: Recognized speech channel unexpectedly closed");}
+                }
             }
         }
     }
     
-    // gotta drop these two first so all the inputs to the speaking channel are closed
-    drop(send);
+    // gotta drop these first so all the inputs to the speaking channel are closed
     drop(in_stream);
+    drop(speaktx);
     talk_thread.join().expect("Error joining the talk thread");
     
 }
@@ -225,7 +176,7 @@ fn rustpotter_init(format : SampleFormat, sample_rate : u16, wwpath : &str) -> R
     rp_config.fmt = rustpotter::AudioFmt {
         sample_rate: sample_rate as usize,
         sample_format: format,
-        channels: 2,
+        channels: 1,
         endianness: rustpotter::Endianness::Little,
     };
     println!("config: {:#?}", rp_config);
@@ -239,4 +190,94 @@ fn rustpotter_init(format : SampleFormat, sample_rate : u16, wwpath : &str) -> R
         Err(_) => {return Err("Failed to add wakeword from file")},
     };
     return Ok(rp);
+}
+
+// set up all the audio input and transcription stuff
+fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, speaktx : Sender<SpeakMessage>)
+    -> Result<(Stream, Receiver<String>), &'static str> {
+    // state stuff
+    let mut state = State::Waiting;
+
+    // initialize rustpotter for wakeword detection
+    let mut rp = rustpotter_init(SampleFormat::I16, 16000, wwpath.as_str())?;
+
+    // set up a buffer for feeding samples to Rustpotter
+    let mut samples_buffer: VecDeque<i16> = VecDeque::new();
+    let rp_buffer_size = rp.get_samples_per_frame();
+
+    // set up vosk for speech recognition (it's short enough that it didn't get its own function)
+    let vosk_model = Model::new(vosk_path.as_str()).ok_or("Error loading Vosk model")?;
+    let mut recog = Recognizer::new(&vosk_model, 16000.0).ok_or("Error creating Vosk recognizer")?;
+
+    
+
+    // make a channel for sending heard text from the user
+    let (texttx, textrx) = mpsc::channel::<String>();
+
+    // input device stuff
+    let host = cpal::default_host();
+    let in_device = host.default_input_device().ok_or("Error: no input device available")?;
+    println!("Input device: {}", in_device.name().or(Err("Error: input device has no name"))?);
+    let supported_configs_range = in_device.supported_input_configs()
+        .expect("error while querying configs");
+    let supported_config = supported_configs_range
+        .filter(|x| x.sample_format() == cpal::SampleFormat::I16 && x.channels() == 1)
+        .next()
+        .ok_or("Error: No supported input configs that match requirements")?
+        .with_sample_rate(cpal::SampleRate(16000));
+    println!("input config: {:#?}", supported_config);
+
+    // actually build the input stream, and tell it what to do with data it receives
+    let in_stream = in_device.build_input_stream(
+        &supported_config.into(),
+        move |data: & [i16], _: &cpal::InputCallbackInfo| {
+            // react to stream events and read or write stream data here.
+            match state {
+                State::Waiting => {
+                    let mut data_vec = data.to_vec().into();
+                    samples_buffer.append(&mut data_vec);
+                    while samples_buffer.len() >= rp_buffer_size {
+                        //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
+                        let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());
+                        if let Some(detection) = detection {
+                            println!("Detected: {:?}", detection);
+                            let _ = speaktx.send(SpeakMessage::Say(ack_phrase.clone()));
+                            state = State::Listening;
+                        }
+                    }
+                },
+                State::Listening => {
+                    let decoding_state = recog.accept_waveform(data).unwrap();
+                    if decoding_state == DecodingState::Finalized {
+                        let vosk::CompleteResult::Single(single_result) = recog.final_result() else { todo!() };
+                        let _ = texttx.send(String::from(single_result.text));
+                        recog.reset();
+                        //state = State::Waiting;
+                    }
+                    if decoding_state == DecodingState::Failed {
+                        eprintln!("Something broke with decoding the audio in Vosk");
+                    }
+                },
+                State::CommandRunning => {}, // doesn't do anything, just waits
+            }
+        },
+        move |err| {
+            // react to errors here.
+            eprintln!("Error with audio input stream: {}", err);
+        },
+        None // None=blocking, Some(Duration)=timeout
+    ).or(Err("Error when building audio input stream"))?;
+
+    // This is supposed to be here but it actually makes it not work for some reason so uhh yeah
+    //match in_stream {
+    //    Ok(is) => {
+    //        match is.play() { // it's possible the stream won't start automatically so this makes sure it does
+    //            Ok(_) => {},
+    //            Err(e) => {eprintln!("Error starting audio stream: {}", e);}
+    //        }
+    //    },
+    //    Err(e) => { eprintln!("Error making audio input stream: {}", e); }
+    //}
+    
+    return Ok((in_stream, textrx));
 }
