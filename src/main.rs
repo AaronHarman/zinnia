@@ -16,8 +16,6 @@ use tray_item::{IconSource, TrayItem};
 
 use vosk::{Model, Recognizer, DecodingState};
 
-mod chunkbuffer;
-use chunkbuffer::ChunkBuffer;
 
 // Messages to be sent to the speech thread
 enum SpeakMessage{
@@ -219,6 +217,7 @@ fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, 
                 State::Waiting => {
                     let mut data_vec = data.to_vec().into();
                     samples_buffer.append(&mut data_vec);
+                    
                     while samples_buffer.len() >= rp_buffer_size {
                         //println!("Used up some of the buffer :) Remaining buffer: {}", samples_buffer.len()-rp_buffer_size);
                         let detection = rp.process_samples(samples_buffer.drain(..rp_buffer_size).collect());

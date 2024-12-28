@@ -15,7 +15,7 @@ pub struct ChunkBuffer<T: Clone> {
 }
 impl<T: Clone> ChunkBuffer<T> {
     // create a new ChunkBuffer with a given chunk size
-    fn new(size : usize) -> ChunkBuffer<T> {
+    pub fn new(size : usize) -> ChunkBuffer<T> {
         return ChunkBuffer {
             chunk_a : Vec::with_capacity(size),
             chunk_b : Vec::with_capacity(size),
@@ -27,12 +27,12 @@ impl<T: Clone> ChunkBuffer<T> {
     }
 
     // check to see if there is a full Vec within the ChunkBuffer
-    fn full(&self) -> bool {
+    pub fn full(&self) -> bool {
         return self.filled_chunk != Chunk::None;
     }
 
     // returns one full chunk from the buffer, replacing it with an empty one
-    fn pop(&mut self) -> Option<Vec<T>> {
+    pub fn pop(&mut self) -> Option<Vec<T>> {
         match self.filled_chunk {
             Chunk::A => {
                 return Some(mem::replace(&mut self.chunk_a, Vec::with_capacity(self.chunk_size)));
@@ -47,7 +47,7 @@ impl<T: Clone> ChunkBuffer<T> {
     }
 
     // pushes new values into the buffer, overflowing into the next buffer if necessary
-    fn push_slice(&mut self, slice : &[T]) {
+    pub fn push_slice(&mut self, slice : &[T]) {
         let remaining = self.chunk_size-self.current_pos;
         // there's enough space to just toss it in there
         if slice.len() <= remaining {
