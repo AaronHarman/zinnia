@@ -16,6 +16,9 @@ use tray_item::{IconSource, TrayItem};
 
 use vosk::{Model, Recognizer, DecodingState};
 
+mod chunkbuffer;
+use chunkbuffer::ChunkBuffer;
+
 // Messages to be sent to the speech thread
 enum SpeakMessage{
     Say(String),
