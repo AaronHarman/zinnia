@@ -16,6 +16,8 @@ use tray_item::{IconSource, TrayItem};
 
 use vosk::{Model, Recognizer, DecodingState};
 
+mod commands;
+
 
 // Messages to be sent to the speech thread
 enum SpeakMessage{
