@@ -3,7 +3,7 @@ use std::io;
 use std::io::{Write, Cursor};
 use std::process::Stdio;
 use std::sync::mpsc;
-use std::sync::mpsc::{Sender, Receiver, TryRecvError};
+use std::sync::mpsc::{Sender, SyncSender, Receiver, TryRecvError};
 use std::thread;
 use std::collections::VecDeque;
 
@@ -17,6 +17,7 @@ use tray_item::{IconSource, TrayItem};
 use vosk::{Model, Recognizer, DecodingState};
 
 mod commands;
+use commands::{CommandDirector, DispatchResult};
 
 
 // Messages to be sent to the speech thread
@@ -40,7 +41,7 @@ fn main() {
     // make a channel for sending messages to be spoken to the talk thread
     let (speaktx, speakrx) = mpsc::channel::<SpeakMessage>();
     
-    let (in_stream, speechrx) = match transcription_init(String::from("Zinnia here!"),
+    let (in_stream, speechrx, statetx) = match transcription_init(String::from("Zinnia here!"),
         String::from("./resources/Yo_Zinnia2.rpw"),
         String::from("resources/vosk-model-en-us-0.21"),
         speaktx.clone()) {
@@ -67,6 +68,9 @@ fn main() {
 
     // set up the tray menu
     let tray_rx = tray_menu_init();
+
+    // set up the command director
+    let mut command_director = CommandDirector::new(speaktx.clone());
     
     // watch for tray messages and spoken input
     loop {
@@ -84,7 +88,11 @@ fn main() {
         match speechrx.try_recv() {
             Ok(s) => {
                 println!("Heard: \"{}\"", s);
-                let _ = speaktx.send(SpeakMessage::Say(s));
+                //let _ = speaktx.send(SpeakMessage::Say(s));
+                match command_director.dispatch_command(s) {
+                    DispatchResult::Done => {statetx.send(State::Waiting).unwrap()},
+                    DispatchResult::Continue => {statetx.send(State::Listening).unwrap()},
+                }
             },
             Err(e) => {
                 match e {
@@ -177,7 +185,7 @@ fn rustpotter_init(format : SampleFormat, sample_rate : u16, wwpath : &str) -> R
 
 // set up all the audio input and transcription stuff
 fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, speaktx : Sender<SpeakMessage>)
-    -> Result<(Stream, Receiver<String>), &'static str> {
+    -> Result<(Stream, Receiver<String>, SyncSender<State>), &'static str> {
     // state stuff
     let mut state = State::Waiting;
 
@@ -192,10 +200,11 @@ fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, 
     let vosk_model = Model::new(vosk_path.as_str()).ok_or("Error loading Vosk model")?;
     let mut recog = Recognizer::new(&vosk_model, 16000.0).ok_or("Error creating Vosk recognizer")?;
 
-    
-
     // make a channel for sending heard text from the user
     let (texttx, textrx) = mpsc::channel::<String>();
+
+    // make a channel for telling the thread to go back to listening
+    let (signaltx, signalrx) = mpsc::sync_channel::<State>(0);
 
     // input device stuff
     let host = cpal::default_host();
@@ -236,13 +245,19 @@ fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, 
                         let vosk::CompleteResult::Single(single_result) = recog.final_result() else { todo!() };
                         let _ = texttx.send(String::from(single_result.text));
                         recog.reset();
-                        //state = State::Waiting;
+                        state = State::CommandRunning;
                     }
                     if decoding_state == DecodingState::Failed {
                         eprintln!("Something broke with decoding the audio in Vosk");
                     }
                 },
-                State::CommandRunning => {}, // doesn't do anything, just waits
+                State::CommandRunning => {
+                    // waits to be told what state to switch to
+                    match signalrx.recv() {
+                        Ok(s) => {state = s},
+                        Err(_) => {},
+                    }
+                },
             }
         },
         move |err| {
@@ -263,7 +278,7 @@ fn transcription_init(ack_phrase : String, wwpath : String, vosk_path : String, 
     //    Err(e) => { eprintln!("Error making audio input stream: {}", e); }
     //}
     
-    return Ok((in_stream, textrx));
+    return Ok((in_stream, textrx, signaltx));
 }
 
 // initialize the tray menu

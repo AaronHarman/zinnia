@@ -65,6 +65,7 @@ impl CommandDirector {
             }
         }
         // TODO: make it indicate somehow if it doesnt find a matching command
+        self.speak.send(SpeakMessage::Say(String::from("I'm not sure what you're asking for. Please try again."))).unwrap();
         return DispatchResult::Done;
     }
 }
