@@ -106,6 +106,7 @@ fn main() {
     // gotta drop these first so all the inputs to the speaking channel are closed
     drop(in_stream);
     drop(speaktx);
+    drop(command_director);
     talk_thread.join().expect("Error joining the talk thread");
     
 }
