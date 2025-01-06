@@ -1,6 +1,12 @@
 use std::sync::mpsc::{Sender};
 use crate::SpeakMessage;
 
+// all the command modules
+mod test;
+use test::TestCommand;
+mod help;
+use help::HelpCommand;
+
 // the result of the execution of a command, indicates whether it needs more input
 pub enum CommandResult {
     Done,
@@ -29,7 +35,7 @@ pub trait Command {
     fn help(&self) -> String;
     fn uses_internet(&self) -> bool;
     fn recognize(&self, text : String) -> bool;
-    fn effect(&self, text : String, speak : Sender<SpeakMessage>) -> CommandResult;
+    fn effect(&mut self, text : String, speak : Sender<SpeakMessage>) -> CommandResult;
 }
 
 // the object responsible for running commands
@@ -47,12 +53,30 @@ impl CommandDirector {
             speak,
         };
         // add commands here
+        cd.commands.push(Box::new(TestCommand{})); // I should probably make a ::new() for this
+        cd.commands.insert(0, Box::new(HelpCommand::new(&cd.commands)));
         return cd;
     }
 
     // takes in text, then determines which command it matches and executes it
     pub fn dispatch_command(&mut self, text : String) -> DispatchResult {
-        for command in &self.commands {
+        // if there's a leftover function from last time
+        if self.next_func.is_some() {
+            let func = self.next_func.unwrap();
+            let result = func(text, self.speak.clone());
+            match result {
+                CommandResult::Done => {
+                    self.next_func = None;
+                    return DispatchResult::Done
+                },
+                CommandResult::Continue(c) => {
+                    self.next_func = Some(c);
+                    return DispatchResult::Continue;
+                }
+            }
+        }
+        // if there's not a leftover function from last time
+        for command in &mut self.commands {
             if command.recognize(text.clone()) {
                 let result = command.effect(text, self.speak.clone());
                 match result {
@@ -64,7 +88,6 @@ impl CommandDirector {
                 }
             }
         }
-        // TODO: make it indicate somehow if it doesnt find a matching command
         self.speak.send(SpeakMessage::Say(String::from("I'm not sure what you're asking for. Please try again."))).unwrap();
         return DispatchResult::Done;
     }
