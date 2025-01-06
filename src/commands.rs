@@ -8,16 +8,18 @@ mod help;
 use help::HelpCommand;
 
 // the result of the execution of a command, indicates whether it needs more input
+// it used to be different from DispatchResult, but has since been changed to be the same.
+// it's being kept separate in case that changes again
 pub enum CommandResult {
     Done,
-    Continue(fn(String, Sender<SpeakMessage>)->CommandResult),
+    Continue,
 }
 impl CommandResult {
     // converts to DispatchResult, for sending to things that don't need the function'
     pub fn to_dispatch(&self) -> DispatchResult {
         match self {
             CommandResult::Done => {return DispatchResult::Done},
-            CommandResult::Continue(_) => {return DispatchResult::Continue},
+            CommandResult::Continue => {return DispatchResult::Continue},
         }
     }
 }
@@ -41,7 +43,7 @@ pub trait Command {
 // the object responsible for running commands
 pub struct CommandDirector {
     commands : Vec<Box<dyn Command>>,
-    next_func : Option<fn(String, Sender<SpeakMessage>)->CommandResult>,
+    next_comm : Option<usize>,
     speak : Sender<SpeakMessage>,
 }
 impl CommandDirector {
@@ -49,7 +51,7 @@ impl CommandDirector {
     pub fn new(speak : Sender<SpeakMessage>) -> CommandDirector {
         let mut cd = CommandDirector {
             commands : Vec::new(),
-            next_func : None,
+            next_comm : None,
             speak,
         };
         // add commands here
@@ -61,28 +63,27 @@ impl CommandDirector {
     // takes in text, then determines which command it matches and executes it
     pub fn dispatch_command(&mut self, text : String) -> DispatchResult {
         // if there's a leftover function from last time
-        if self.next_func.is_some() {
-            let func = self.next_func.unwrap();
-            let result = func(text, self.speak.clone());
+        if self.next_comm.is_some() {
+            let result = self.commands[self.next_comm.unwrap()].effect(text, self.speak.clone());
             match result {
                 CommandResult::Done => {
-                    self.next_func = None;
+                    self.next_comm = None;
                     return DispatchResult::Done
                 },
-                CommandResult::Continue(c) => {
-                    self.next_func = Some(c);
+                CommandResult::Continue => {
+                    // next_comm stays the same
                     return DispatchResult::Continue;
                 }
             }
         }
         // if there's not a leftover function from last time
-        for command in &mut self.commands {
+        for (index, command) in &mut self.commands.iter_mut().enumerate() {
             if command.recognize(text.clone()) {
                 let result = command.effect(text, self.speak.clone());
                 match result {
                     CommandResult::Done => {return DispatchResult::Done},
-                    CommandResult::Continue(c) => {
-                        self.next_func = Some(c);
+                    CommandResult::Continue => {
+                        self.next_comm = Some(index);
                         return DispatchResult::Continue;
                     }
                 }

@@ -2,21 +2,27 @@ use crate::commands::{Command, CommandResult};
 use std::sync::mpsc::{Sender};
 use crate::SpeakMessage;
 
+enum State {
+    AskForCommand,
+    GiveHelp,
+}
+
 pub struct HelpCommand {
     list : Vec<(String, String, bool)>,
+    state : State,
 }
 impl HelpCommand {
     pub fn new(commands : &Vec<Box<dyn Command>>) -> HelpCommand {
-       let mut list = Vec::new();
-       for command in commands {
-           list.push((command.name().make_ascii_lowercase(), command.help(), command.uses_internet()));
-       }
-       return HelpCommand{list};
-    }
-    // follow-up function for when you give it the name of a command
-    pub fn effect2(&mut self, text : String, speak : Sender<SpeakMessage>) -> CommandResult {
-        //TODO This whole thing lol
-        return CommandResult::Done;
+        let mut list = Vec::new();
+        for command in commands {
+            let mut lower = command.name();
+            lower.make_ascii_lowercase();
+            list.push((lower, command.help(), command.uses_internet()));
+        }
+        return HelpCommand{
+            list,
+            state : State::AskForCommand,
+        };
     }
 }
 impl Command for HelpCommand {
@@ -36,7 +42,16 @@ impl Command for HelpCommand {
         return text.contains("help");
     }
     fn effect(&mut self, text : String, speak : Sender<SpeakMessage>) -> CommandResult {
-        speak.send(SpeakMessage::Say(String::from("Which command would you like help with?"))).unwrap();
-        return CommandResult::Continue(self.effect2);
+        match self.state {
+            State::AskForCommand => {
+                speak.send(SpeakMessage::Say(String::from("Which command would you like help with?"))).unwrap();
+                return CommandResult::Continue;
+            },
+            State::GiveHelp => {
+                //TODO make this work lol
+                return CommandResult::Done;
+            }
+        }
+
     }
 }
