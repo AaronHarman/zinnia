@@ -45,10 +45,20 @@ impl Command for HelpCommand {
         match self.state {
             State::AskForCommand => {
                 speak.send(SpeakMessage::Say(String::from("Which command would you like help with?"))).unwrap();
+                self.state = State::GiveHelp;
                 return CommandResult::Continue;
             },
             State::GiveHelp => {
-                //TODO make this work lol
+                // say the help text for whatever command they say
+                for (name, help, net) in &self.list {
+                    if text.contains(name) {
+                        let does_it = if *net {String::from("does")} else {String::from("does not")};
+                        speak.send(SpeakMessage::Say(format!("{} This command {} require the internet.", help, does_it))).unwrap();
+                        break;
+                    }
+                }
+                speak.send(SpeakMessage::Say(format!("I couldn't find a command named {}, please try again.", text))).unwrap();
+                self.state = State::AskForCommand;
                 return CommandResult::Done;
             }
         }
