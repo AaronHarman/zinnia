@@ -54,7 +54,7 @@ impl Command for HelpCommand {
                     if text.contains(name) {
                         let does_it = if *net {String::from("does")} else {String::from("does not")};
                         speak.send(SpeakMessage::Say(format!("{} This command {} require the internet.", help, does_it))).unwrap();
-                        break;
+                        return CommandResult::Done;
                     }
                 }
                 speak.send(SpeakMessage::Say(format!("I couldn't find a command named {}, please try again.", text))).unwrap();
