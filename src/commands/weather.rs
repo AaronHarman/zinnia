@@ -2,6 +2,7 @@ use crate::commands::{Command, CommandResult};
 use std::process::Command as ExtCommand;
 use std::sync::mpsc::{Sender};
 use crate::SpeakMessage;
+use reqwest;
 use json;
 
 pub struct WeatherCommand {
@@ -35,6 +36,8 @@ impl Command for WeatherCommand {
             let mut iter = words.split_inclusive(|s| *s == "in");
             place = iter.nth(1).unwrap().join("+");
         }
+        let response = reqwest::blocking::get(format!("wttr.in/{}?format=j1", place));
+        //TODO ALL OF THIS LMAO
         let result = ExtCommand::new("curl")
             .arg(format!("wttr.in/{}?format=j1", place))
             .output()
