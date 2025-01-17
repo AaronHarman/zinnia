@@ -1,5 +1,4 @@
 use crate::commands::{Command, CommandResult};
-use std::process::Command as ExtCommand;
 use std::sync::mpsc::{Sender};
 use crate::SpeakMessage;
 use reqwest;
@@ -11,6 +10,16 @@ pub struct WeatherCommand {
 impl WeatherCommand {
     pub fn new(default_loc : String) -> WeatherCommand {
         return WeatherCommand{default_loc};
+    }
+    // for sending HTTP requests
+    fn request(url : String) -> Result<String, &'static str> {
+        let response = reqwest::blocking::get(url).or(Err("I was unable to connect to the weather service."))?;
+        if response.status().is_success() {
+            let text = response.text().or(Err("I had a problem understanding the weather service."))?;
+            return Ok(text);
+        } else {
+            return Err("I didn't get a response from the weather service.");
+        }
     }
 }
 impl Command for WeatherCommand {
@@ -36,14 +45,14 @@ impl Command for WeatherCommand {
             let mut iter = words.split_inclusive(|s| *s == "in");
             place = iter.nth(1).unwrap().join("+");
         }
-        let response = reqwest::blocking::get(format!("wttr.in/{}?format=j1", place));
-        //TODO ALL OF THIS LMAO
-        let result = ExtCommand::new("curl")
-            .arg(format!("wttr.in/{}?format=j1", place))
-            .output()
-            .expect("Failed to execute curl")
-            .stdout;
-        let stringy = String::from_utf8(result).unwrap();
+        let response = WeatherCommand::request(format!("wttr.in/{}?format=j1", place));
+        let stringy : String = match response {
+            Ok(s) => {s},
+            Err(e) => {
+                speak.send(SpeakMessage::Say(format!("{} Please try again later.", e))).unwrap();
+                return CommandResult::Done;
+            }
+        };
         let parsed = json::parse(&stringy).expect("Couldn't parse JSON response");
         println!("{:?}", parsed["current_condition"].pretty(2));
         let weather = parsed["current_condition"][0]["weatherDesc"][0]["value"].dump();

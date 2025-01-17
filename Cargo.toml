@@ -12,4 +12,4 @@ tray-item = { version = "0.10.0", features = ["ksni"] }
 png = "0.16"
 vosk = "0.3.1"
 json = "0.12.4"
-reqwest =  "0.12.12"
+reqwest =  { version = "0.12.12", features = ["blocking"] }
