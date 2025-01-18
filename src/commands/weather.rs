@@ -45,7 +45,7 @@ impl Command for WeatherCommand {
             let mut iter = words.split_inclusive(|s| *s == "in");
             place = iter.nth(1).unwrap().join("+");
         }
-        let response = WeatherCommand::request(format!("wttr.in/{}?format=j1", place));
+        let response = WeatherCommand::request(format!("https://wttr.in/{}?format=j1", place));
         let stringy : String = match response {
             Ok(s) => {s},
             Err(e) => {
@@ -59,7 +59,7 @@ impl Command for WeatherCommand {
         let temp = parsed["current_condition"][0]["temp_F"].dump();
         let feels = parsed["current_condition"][0]["FeelsLikeF"].dump();
         speak.send(SpeakMessage::Say(format!("The weather in {} is {}. It is {} degrees and feels like {} degrees.",
-                                             place, weather, temp, feels))).unwrap();
+                                             place.replace("+"," "), weather, temp, feels))).unwrap();
         return CommandResult::Done;
     }
 }
