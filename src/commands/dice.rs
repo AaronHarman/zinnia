@@ -54,7 +54,10 @@ impl Command for DiceCommand {
         let mut answer = String::from("I rolled: ");
         for i in 1..=num {
             let roll = (rand::random::<u32>() % size) + 1;
-            if i == num {
+            if num == 1 {
+                answer.push_str(&format!("{}.", roll));
+            }
+            else if i == num {
                 answer.push_str(&format!("and {}.", roll));
             } else {
                 answer.push_str(&format!("{}, ", roll));

@@ -59,7 +59,10 @@ impl Command for WeatherCommand {
         let temp = parsed["current_condition"][0]["temp_F"].dump();
         let feels = parsed["current_condition"][0]["FeelsLikeF"].dump();
         speak.send(SpeakMessage::Say(format!("The weather in {} is {}. It is {} degrees and feels like {} degrees.",
-                                             place.replace("+"," "), weather, temp, feels))).unwrap();
+                                             place.replace("+"," "),
+                                             weather.trim_matches('"'),
+                                             temp.trim_matches('"'),
+                                             feels.trim_matches('"')))).unwrap();
         return CommandResult::Done;
     }
 }

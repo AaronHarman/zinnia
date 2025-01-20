@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Sender, SyncSender, Receiver, TryRecvError};
 use std::thread;
 use std::collections::VecDeque;
+use std::fs;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::Stream;
@@ -15,6 +16,8 @@ use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat};
 use tray_item::{IconSource, TrayItem};
 
 use vosk::{Model, Recognizer, DecodingState};
+
+use notify_rust::{Notification, Timeout};
 
 mod commands;
 use commands::{CommandDirector, DispatchResult};
@@ -56,6 +59,7 @@ fn main() {
     let talk_thread = thread::spawn(move || {
         for message in speakrx {
             let SpeakMessage::Say(thing) = message;
+            send_notif(&thing);
             match say(thing.to_string()) {
                 Ok(_) => {},
                 Err(e) => {eprintln!("Error with speech synthesis: {}", e);}
@@ -305,5 +309,16 @@ fn tray_menu_init() -> Receiver<TrayMessage> {
         }).unwrap();
 
     return tray_rx;
+}
+
+// sends a system notification with the given text
+fn send_notif(text : &String) {
+    Notification::new()
+        .summary("ZINNIA")
+        .appname("ZINNIA")
+        .body(text)
+        .icon(fs::canonicalize("resources/1f444.png").unwrap().to_str().unwrap())
+        .timeout(Timeout::Milliseconds((3000 as f32 * (text.len() as f32 / 20.0)) as u32))
+        .show().unwrap();
 }
 
