@@ -8,6 +8,10 @@ mod help;
 use help::HelpCommand;
 mod weather;
 use weather::WeatherCommand;
+mod joke;
+use joke::JokeCommand;
+mod dice;
+use dice::DiceCommand;
 
 // the result of the execution of a command, indicates whether it needs more input
 // it used to be different from DispatchResult, but has since been changed to be the same.
@@ -59,6 +63,8 @@ impl CommandDirector {
         // add commands here
         cd.commands.push(Box::new(TestCommand{})); // I should probably make a ::new() for this
         cd.commands.push(Box::new(WeatherCommand::new(String::from("Drums"))));
+        cd.commands.push(Box::new(JokeCommand{}));
+        cd.commands.push(Box::new(DiceCommand{}));
         cd.commands.insert(0, Box::new(HelpCommand::new(&cd.commands)));
         return cd;
     }
