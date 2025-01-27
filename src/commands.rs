@@ -12,6 +12,8 @@ mod joke;
 use joke::JokeCommand;
 mod dice;
 use dice::DiceCommand;
+mod alarm;
+use alarm::AlarmCommand;
 
 // the result of the execution of a command, indicates whether it needs more input
 // it used to be different from DispatchResult, but has since been changed to be the same.
@@ -65,6 +67,7 @@ impl CommandDirector {
         cd.commands.push(Box::new(WeatherCommand::new(String::from("Drums"))));
         cd.commands.push(Box::new(JokeCommand{}));
         cd.commands.push(Box::new(DiceCommand{}));
+        cd.commands.push(Box::new(AlarmCommand{}));
         cd.commands.insert(0, Box::new(HelpCommand::new(&cd.commands)));
         return cd;
     }
